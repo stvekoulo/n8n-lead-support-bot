@@ -1,0 +1,1097 @@
+{
+  "name": "Bot Qualification Leads & Support Client",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contact-form",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "6be4422d-f638-48ca-aa29-16e95cf860dd",
+      "name": "Webhook Formulaire",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -5344,
+        1520
+      ],
+      "webhookId": "generate-unique-id",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Nettoie et formate le message reçu\nconst rawMessage = $input.first().json.body.message || $input.first().json.body.text || '';\nconst email = $input.first().json.body.email || '';\nconst name = $input.first().json.body.name || '';\n\n// Retire le HTML et nettoie le texte\nconst cleanMessage = rawMessage\n  .replace(/<[^>]*>/g, '')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\n// Valide l'email\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nconst isValidEmail = emailRegex.test(email);\n\nreturn {\n  message: cleanMessage,\n  email: isValidEmail ? email : null,\n  name: name,\n  timestamp: new Date().toISOString(),\n  rawData: $input.first().json.body\n};"
+      },
+      "id": "f52bb26d-af76-4ce6-9bde-2f038c0bb8df",
+      "name": "Nettoyer Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5120,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "HTTP-Referer",
+              "value": "https://nodus-ai.site"
+            },
+            {
+              "name": "X-Title",
+              "value": "Bot Qualification Client"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"openai/gpt-oss-20b:free\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Tu es un assistant de classification de messages clients. Analyse le message et détermine sa catégorie.\\n\\nCATÉGORIES POSSIBLES:\\n- \\\"commercial\\\" : demande d'information produit/service, devis, partenariat, essai gratuit\\n- \\\"support\\\" : problème technique, bug, question sur utilisation, aide\\n- \\\"spam\\\" : publicité, message non sollicité, incohérent, sans sens\\n\\nEXTRACTION :\\n- Nom de la personne (si mentionné dans le message)\\n- Email (si présent dans le message)\\n- Résumé en 1 phrase (15 mots max)\\n- Urgence : \\\"haute\\\" (problème bloquant, urgent), \\\"moyenne\\\" (demande normale), \\\"basse\\\" (simple question)\\n\\nRÉPONDS UNIQUEMENT EN JSON VALIDE, sans markdown :\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"MESSAGE À ANALYSER:\\nNom fourni: {{ $json.name }}\\nEmail fourni: {{ $json.email }}\\nMessage: {{ $json.message }}\\n\\nRéponds en JSON avec : {\\\"type\\\": \\\"commercial|support|spam\\\", \\\"nom\\\": \\\"string ou null\\\", \\\"email\\\": \\\"string ou null\\\", \\\"resume\\\": \\\"string\\\", \\\"urgence\\\": \\\"haute|moyenne|basse\\\", \\\"confiance\\\": 0.95}\"\n    }\n  ],\n  \"temperature\": 0.3,\n  \"max_tokens\": 200\n}",
+        "options": {}
+      },
+      "id": "53ccdd67-79b1-4178-8c6d-b225f6a161bd",
+      "name": "Analyser avec OpenRouter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -4896,
+        1520
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "LSenIfptrE1y49Gw",
+          "name": "OpenRouter API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse la réponse de l'IA et fusionne avec les données originales\ntry {\n  const response = $input.first().json;\n  const aiContent = response.choices[0].message.content;\n  \n  // Retire les balises markdown si présentes\n  const cleanContent = aiContent.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  \n  const aiAnalysis = JSON.parse(cleanContent);\n  const originalData = $('Nettoyer Message').first().json;\n  \n  return {\n    ...originalData,\n    ...aiAnalysis,\n    // Priorise les données originales si l'IA n'a pas détecté\n    email: aiAnalysis.email || originalData.email,\n    nom: aiAnalysis.nom || originalData.name,\n    analysisSuccess: true\n  };\n} catch (error) {\n  // En cas d'erreur, classification par défaut\n  const originalData = $('Nettoyer Message').first().json;\n  return {\n    ...originalData,\n    type: 'support',\n    resume: 'Erreur d\\'analyse - À traiter manuellement',\n    urgence: 'moyenne',\n    confiance: 0,\n    analysisSuccess: false,\n    error: error.message\n  };\n}"
+      },
+      "id": "cec83a19-e0d1-4327-bf27-73dfe9a5e618",
+      "name": "Parser Réponse IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4672,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.type }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "commercial"
+            },
+            {
+              "value2": "support"
+            },
+            {
+              "value2": "spam"
+            }
+          ]
+        }
+      },
+      "id": "9437a142-ef46-4397-a25b-0a77ddad05d0",
+      "name": "Router par Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        -4448,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1p605d0bYfIyeSs4uqpuVariteWQoo47lTfw4iWVjVM4",
+          "mode": "list",
+          "cachedResultName": "Prospects",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1p605d0bYfIyeSs4uqpuVariteWQoo47lTfw4iWVjVM4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Feuille 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1p605d0bYfIyeSs4uqpuVariteWQoo47lTfw4iWVjVM4/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.timestamp }}",
+            "Nom": "={{ $json.name }}",
+            "Email": "={{ $json.email }}",
+            "Résumé Demande": "={{ $json.resume }}",
+            "Urgence": "={{ $json.urgence }}",
+            "Confiance IA": "={{ $json.confiance }}",
+            "Message Complet": "={{ $json.message }}"
+          },
+          "matchingColumns": [
+            "Date"
+          ],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Nom",
+              "displayName": "Nom",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Résumé Demande",
+              "displayName": "Résumé Demande",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Urgence",
+              "displayName": "Urgence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Confiance IA",
+              "displayName": "Confiance IA",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Traité",
+              "displayName": "Traité",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Message Complet",
+              "displayName": "Message Complet",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "rawData",
+              "displayName": "rawData",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "type",
+              "displayName": "type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "nom",
+              "displayName": "nom",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "resume",
+              "displayName": "resume",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "urgence",
+              "displayName": "urgence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "confiance",
+              "displayName": "confiance",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "analysisSuccess",
+              "displayName": "analysisSuccess",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "24ed6105-f961-499a-bf07-95f9ac836320",
+      "name": "Ajouter Prospect",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -4224,
+        1248
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E0vMgSXjpaGriDD2",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "=Merci pour votre intérêt !",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: #4CAF50; color: white; padding: 20px; text-align: center; }\n    .content { padding: 20px; background: #f9f9f9; }\n    .footer { text-align: center; padding: 20px; font-size: 12px; color: #777; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>🎉 Merci pour votre intérêt !</h1>\n    </div>\n    <div class=\"content\">\n      <p>Bonjour{{ $json.nom ? ' ' + $json.nom : '' }},</p>\n      <p>Nous avons bien reçu votre demande concernant :</p>\n      <p><strong>={{ $json.resume }}</strong></p>\n      <p>Notre équipe commerciale va étudier votre demande et reviendra vers vous dans les plus brefs délais.</p>\n      <p>En attendant, n'hésitez pas à consulter notre site web pour découvrir nos solutions.</p>\n      <p>Cordialement,<br>L'équipe Commerciale</p>\n    </div>\n    <div class=\"footer\">\n      <p>Cet email a été envoyé automatiquement. Pour toute question, répondez directement à cet email.</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "bd8ffa6e-34fd-478a-ae6d-6df9937b5db8",
+      "name": "Email au Prospect",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -3776,
+        1248
+      ],
+      "webhookId": "7fbaead3-b734-434b-93dd-2fb06a5385c8",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "SyORlwUj0BtDtQPG",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://wasenderapi.com/api/send-message",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "+22955508870"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.whatsappText }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c7ba37b9-a590-4d26-9cdf-351aa1f53e8f",
+      "name": "WhatsApp Notif Prospect",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -3328,
+        1248
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "FOdzS3cYFqCXZ0Y9",
+          "name": "WasenderAPI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Génère un ID unique pour le ticket\nconst timestamp = Date.now();\nconst random = Math.random().toString(36).substring(2, 6).toUpperCase();\nconst ticketId = `${timestamp}-${random}`;\n\nreturn {\n  ...items[0].json,\n  ticketId: ticketId,\n  statut: 'Nouveau',\n  dateCreation: new Date().toISOString()\n};"
+      },
+      "id": "cd04e08b-3a6d-4b24-a72b-107f69340fc0",
+      "name": "Générer ID Ticket",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4224,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "14IGmwFAHGBKW2gtZBXV6G9Txp67FxAcX1RH2ZK9RLh0",
+          "mode": "list",
+          "cachedResultName": "Tickets Support",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14IGmwFAHGBKW2gtZBXV6G9Txp67FxAcX1RH2ZK9RLh0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Feuille 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/14IGmwFAHGBKW2gtZBXV6G9Txp67FxAcX1RH2ZK9RLh0/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Ticket ID": "={{ $json.ticketId }}",
+            "Date": "={{ $json.dateCreation }}",
+            "Email": "={{ $json.email }}"
+          },
+          "matchingColumns": [
+            "Ticket ID"
+          ],
+          "schema": [
+            {
+              "id": "Ticket ID",
+              "displayName": "Ticket ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Nom",
+              "displayName": "Nom",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Résumé",
+              "displayName": "Résumé",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Urgence",
+              "displayName": "Urgence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Statut",
+              "displayName": "Statut",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Message Complet",
+              "displayName": "Message Complet",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "450db071-b72f-4bd8-a44d-1aef92d83d5a",
+      "name": "Ajouter Ticket Support",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -4032,
+        1520
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E0vMgSXjpaGriDD2",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "=Votre demande de support [Ticket #{{ $json.ticketId }}]",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: #2196F3; color: white; padding: 20px; text-align: center; }\n    .ticket { background: #E3F2FD; padding: 15px; margin: 20px 0; border-radius: 5px; }\n    .content { padding: 20px; background: #f9f9f9; }\n    .footer { text-align: center; padding: 20px; font-size: 12px; color: #777; }\n    .urgence-haute { color: #f44336; font-weight: bold; }\n    .urgence-moyenne { color: #ff9800; }\n    .urgence-basse { color: #4caf50; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>🎫 Ticket de Support</h1>\n    </div>\n    <div class=\"content\">\n      <p>Bonjour{{ $json.nom ? ' ' + $json.nom : '' }},</p>\n      <p>Nous avons bien reçu votre demande de support :</p>\n      <div class=\"ticket\">\n        <strong>Numéro de ticket :</strong> #{{ $json.ticketId }}<br>\n        <strong>Urgence :</strong> <span class=\"urgence-{{ $json.urgence }}\">{{ $json.urgence.toUpperCase() }}</span><br>\n        <strong>Résumé :</strong> {{ $json.resume }}\n      </div>\n      <p>{{ $json.urgence === 'haute' ? 'Notre équipe va traiter votre demande en priorité.' : 'Notre équipe reviendra vers vous dans les meilleurs délais.' }}</p>\n      <p>Conservez ce numéro de ticket pour tout suivi.</p>\n      <p>Cordialement,<br>L'équipe Support</p>\n    </div>\n    <div class=\"footer\">\n      <p>Cet email est automatique. Pour répondre, mentionnez le numéro de ticket.</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "c9a836e7-39c2-4930-8821-b38a1c61320c",
+      "name": "Email Confirmation Support",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -3696,
+        1520
+      ],
+      "webhookId": "f892e1e4-3782-4062-872f-6c188a742ef2",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "SyORlwUj0BtDtQPG",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Router par Type').first().json.urgence }}",
+              "value2": "haute"
+            }
+          ]
+        }
+      },
+      "id": "8901fae4-8038-41c3-b64d-20265f3cb532",
+      "name": "Si Urgence Haute",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -3520,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://wasenderapi.com/api/send-message",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "to",
+              "value": "+22955508870"
+            },
+            {
+              "name": "text",
+              "value": "=🚨 TICKET URGENT\n\n🎫 Ticket: #{{ $('Router par Type').first().json.email }}\n👤 Client: {{ $('Router par Type').first().json.name }}\n📧 Email: {{ $('Router par Type').first().json.email }}\n📝 Problème: {{ $('Router par Type').first().json.resume }}\n⚠️ URGENCE: HAUTE\n\nAction requise immédiatement !"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "28f52fec-fe6e-4592-97ca-49e86e95cd5c",
+      "name": "WhatsApp Notif Urgent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -3280,
+        1504
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "FOdzS3cYFqCXZ0Y9",
+          "name": "WasenderAPI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1Wwq6e3DgB0n05_93ghn3kuERdO098EqeQJDNykV89RQ",
+          "mode": "list",
+          "cachedResultName": "Logger Spam",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1Wwq6e3DgB0n05_93ghn3kuERdO098EqeQJDNykV89RQ/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Feuille 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1Wwq6e3DgB0n05_93ghn3kuERdO098EqeQJDNykV89RQ/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.timestamp }}",
+            "Email": "={{ $json.email }}",
+            "Message": "={{ $json.message }}",
+            "Name": "={{ $json.name }}",
+            "Confidence": "={{ $json.confiance }}"
+          },
+          "matchingColumns": [
+            "Date"
+          ],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Message",
+              "displayName": "Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Confidence",
+              "displayName": "Confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2ed598c9-14b2-4b73-8a9b-39a80fb4a931",
+      "name": "Logger Spam",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -3328,
+        1728
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E0vMgSXjpaGriDD2",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Votre message a été reçu et sera traité dans les plus brefs délais.\",\n  \"timestamp\": \"{{ $('Router par Type').first().json.timestamp }}\"\n}",
+        "options": {}
+      },
+      "id": "05cd9b96-a445-4167-b74d-8ba75a5d23f6",
+      "name": "Réponse Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -2976,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "email",
+              "value": "={{ $('Router par Type').first().json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "nom",
+              "value": "={{ $('Router par Type').first().json.nom }}",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "resume",
+              "value": "={{ $('Router par Type').first().json.resume }}",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "urgence",
+              "value": "={{ $('Router par Type').first().json.urgence }}",
+              "type": "string"
+            },
+            {
+              "id": "id-5",
+              "name": "timestamp",
+              "value": "={{ $('Router par Type').first().json.timestamp }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "c80b5b0c-cca4-4abb-a044-cd0048f6f1b8",
+      "name": "Préparer Données Email",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4000,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "whatsappText",
+              "value": "={{ '🆕 NOUVEAU PROSPECT\\n\\n👤 Nom: ' + $('Router par Type').first().json.name + '\\n📧 Email: ' + $('Router par Type').first().json.email + '\\n📝 Demande: ' + $('Router par Type').first().json.resume + '\\n⚡ Urgence: ' + $('Router par Type').first().json.urgence + '\\n🕐 Reçu: ' + $('Router par Type').first().json.timestamp }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "a32549db-cfc4-4919-8162-d8cd7bef12bc",
+      "name": "Préparer WhatsApp Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3552,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "email",
+              "value": "={{ $('Router par Type').first().json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "nom",
+              "value": "={{ $('Router par Type').first().json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "resume",
+              "value": "={{ $('Router par Type').first().json.resume }}",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "urgence",
+              "value": "={{ $('Router par Type').first().json.urgence }}",
+              "type": "string"
+            },
+            {
+              "id": "id-5",
+              "name": "timestamp",
+              "value": "={{ $('Router par Type').first().json.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "730d8b88-85cc-448c-a47b-633a4643529d",
+              "name": "ticketId",
+              "value": "={{ $('Générer ID Ticket').first().json.ticketId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "b333785f-89ef-4605-9efe-3eb102602275",
+      "name": "Préparer Données Email1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3840,
+        1520
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Formulaire": {
+      "main": [
+        [
+          {
+            "node": "Nettoyer Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nettoyer Message": {
+      "main": [
+        [
+          {
+            "node": "Analyser avec OpenRouter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyser avec OpenRouter": {
+      "main": [
+        [
+          {
+            "node": "Parser Réponse IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parser Réponse IA": {
+      "main": [
+        [
+          {
+            "node": "Router par Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Router par Type": {
+      "main": [
+        [
+          {
+            "node": "Ajouter Prospect",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Générer ID Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Logger Spam",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Notif Prospect": {
+      "main": [
+        [
+          {
+            "node": "Réponse Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Générer ID Ticket": {
+      "main": [
+        [
+          {
+            "node": "Ajouter Ticket Support",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ajouter Ticket Support": {
+      "main": [
+        [
+          {
+            "node": "Préparer Données Email1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Confirmation Support": {
+      "main": [
+        [
+          {
+            "node": "Si Urgence Haute",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Si Urgence Haute": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Notif Urgent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Réponse Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Notif Urgent": {
+      "main": [
+        [
+          {
+            "node": "Réponse Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Logger Spam": {
+      "main": [
+        [
+          {
+            "node": "Réponse Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ajouter Prospect": {
+      "main": [
+        [
+          {
+            "node": "Préparer Données Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Préparer Données Email": {
+      "main": [
+        [
+          {
+            "node": "Email au Prospect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email au Prospect": {
+      "main": [
+        [
+          {
+            "node": "Préparer WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Préparer WhatsApp Message": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Notif Prospect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Préparer Données Email1": {
+      "main": [
+        [
+          {
+            "node": "Email Confirmation Support",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "b4177b8a-332e-433c-bb00-8c77a16e1f7a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8aad0fa18ea1ddb0e348d7c9660e85b4b7d3602f57a7e110194de6f424f95478"
+  },
+  "id": "P2YwM034ygnb3kfe",
+  "tags": []
+}
