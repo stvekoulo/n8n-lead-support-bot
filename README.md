@@ -423,4 +423,4 @@ Si ce workflow t'a aidé, n'hésite pas à mettre une ⭐ sur GitHub ! Ça m'enc
 
 ---
 
-**Made with ❤️ by [Steven] - Mon premier workflow n8n !**
+**Made with by Steven - Mon premier workflow n8n !**
